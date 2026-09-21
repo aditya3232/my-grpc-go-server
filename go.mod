@@ -3,7 +3,7 @@ module github.com/aditya3232/my-grpc-go-server
 go 1.26.4
 
 require (
-	github.com/aditya3232/my-grpc-proto v0.0.0-20260921094403-020bb4dd033f
+	github.com/aditya3232/my-grpc-proto v0.0.0-20260921133430-5559403f6a00
 	google.golang.org/grpc v1.84.0
 )
 

@@ -2,7 +2,10 @@ package grpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"log"
 	"time"
 
 	"github.com/aditya3232/my-grpc-proto/protogen/go/hello"
@@ -33,4 +36,28 @@ func (a *GrpcAdapter) SayManyHellos(req *hello.HelloRequest, stream grpc.ServerS
 	}
 
 	return nil
+}
+
+func (a *GrpcAdapter) SayHelloToEveryone(stream grpc.ClientStreamingServer[hello.HelloRequest, hello.HelloResponse]) error {
+	res := ""
+
+	for {
+		req, err := stream.Recv()
+		switch {
+		// setelah client selesai mengirim data, server lalu mengirim response tunggal berisi res dengan SendAndClose
+		case errors.Is(err, io.EOF):
+			return stream.SendAndClose(
+				&hello.HelloResponse{
+					Greet: res,
+				},
+			)
+		case err != nil:
+			log.Fatalln("Error while reading from client : ", err)
+		}
+
+		greet := a.helloService.GenerateHello(req.Name)
+
+		res += greet + " "
+	}
+
 }
