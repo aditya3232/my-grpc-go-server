@@ -61,3 +61,27 @@ func (a *GrpcAdapter) SayHelloToEveryone(stream grpc.ClientStreamingServer[hello
 	}
 
 }
+
+func (a *GrpcAdapter) SayHelloContinous(stream grpc.BidiStreamingServer[hello.HelloRequest, hello.HelloResponse]) error {
+	for {
+		req, err := stream.Recv()
+		switch {
+		case errors.Is(err, io.EOF):
+			return nil
+		case err != nil:
+			log.Fatalln("Error while reading from client : ", err)
+		}
+
+		// untuk setiap request kita membuat string response dan mengirimkan response ke client
+		greet := a.helloService.GenerateHello(req.Name)
+
+		err = stream.Send(
+			&hello.HelloResponse{
+				Greet: greet,
+			},
+		)
+		if err != nil {
+			log.Fatalln("Error while sending response to client : ", err)
+		}
+	}
+}

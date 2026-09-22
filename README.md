@@ -84,3 +84,13 @@ go get github.com/aditya3232/my-grpc-proto@latest
 - proses banyak gambar -> misalnya  client mengirimkan banyak gambar, untuk digabungkan oleh server, dan server mengembalikan satu gambar besar atau satu file album
 - real time analytics -> misalnya client mengirimkan beberapa data lokasi, server menganalisa lokasi terbaik untuk kriteria tertentu dan mengembalikan 1 rekomendasi lokasi yang direkomendasikan
 - sensor data -> pengumpulan data dari sensor, misalnya mengirimkan data sensor setiap detik selama 5 menit
+
+## 7. Bi-Directional Streaming gRPC
+- client mengirim banyak request
+- server menerima dan memproses setiap request
+- server mengirim banyak response
+
+### contoh use case
+- untuk analisa data realtime, mengambil tindakan berdasarkan data
+- kolaborasi realtime, misal chat atau game multiplayer
+- pengumpulan data dari beberapa perangkat IoT device
