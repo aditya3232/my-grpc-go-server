@@ -1,0 +1,11 @@
+package port
+
+import (
+	db "github.com/aditya3232/my-grpc-go-server/internal/adapter/database"
+	"github.com/google/uuid"
+)
+
+type DummyDatabasePort interface {
+	Save(data *db.DummyOrm) (uuid.UUID, error)
+	GetByUUID(uuid *uuid.UUID) (db.DummyOrm, error)
+}
