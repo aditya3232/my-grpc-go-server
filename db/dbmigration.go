@@ -18,9 +18,9 @@ func Migrate(conn *sql.DB) {
 		log.Println("Database migration failed : ", err)
 	}
 
-	if err := m.Down(); err != nil {
-		log.Println("Database migration (down) failed : ", err)
-	}
+	// if err := m.Down(); err != nil {
+	// 	log.Println("Database migration (down) failed : ", err)
+	// }
 
 	if err := m.Up(); err != nil {
 		log.Println("Database migration (up) failed : ", err)
