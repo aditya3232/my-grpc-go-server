@@ -6,20 +6,24 @@ import (
 	"net"
 
 	"github.com/aditya3232/my-grpc-go-server/internal/port"
+	"github.com/aditya3232/my-grpc-proto/protogen/go/bank"
 	"github.com/aditya3232/my-grpc-proto/protogen/go/hello"
 	"google.golang.org/grpc"
 )
 
 type GrpcAdapter struct {
 	helloService port.HelloServicePort
+	bankService  port.BankServicePort
 	grpcPort     int
 	server       *grpc.Server
 	hello.HelloServiceServer
+	bank.BankServiceServer
 }
 
-func NewGrpcAdapter(helloService port.HelloServicePort, grpcPort int) *GrpcAdapter {
+func NewGrpcAdapter(helloService port.HelloServicePort, bankService port.BankServicePort, grpcPort int) *GrpcAdapter {
 	return &GrpcAdapter{
 		helloService: helloService,
+		bankService:  bankService,
 		grpcPort:     grpcPort,
 	}
 }
@@ -38,6 +42,7 @@ func (a *GrpcAdapter) Run() {
 	a.server = grpcServer
 
 	hello.RegisterHelloServiceServer(grpcServer, a)
+	bank.RegisterBankServiceServer(grpcServer, a)
 
 	if err = grpcServer.Serve(listen); err != nil {
 		log.Fatalf("Failed to serve gRPC on port %d : %v\n", a.grpcPort, err)
