@@ -5,6 +5,7 @@ import (
 	"log"
 
 	dbmigration "github.com/aditya3232/my-grpc-go-server/db"
+	mydb "github.com/aditya3232/my-grpc-go-server/internal/adapter/database"
 	mygrpc "github.com/aditya3232/my-grpc-go-server/internal/adapter/grpc"
 	app "github.com/aditya3232/my-grpc-go-server/internal/application"
 
@@ -22,15 +23,13 @@ func main() {
 
 	dbmigration.Migrate(sqlDB)
 
-	// databaseAdapter, err := mydb.NewDatabaseAdapter(sqlDB)
-	// if err != nil {
-	// 	log.Fatalln("Can't create database adapter : ", err)
-	// }
-
-	// runDummyOrm(databaseAdapter)
+	databaseAdapter, err := mydb.NewDatabaseAdapter(sqlDB)
+	if err != nil {
+		log.Fatalln("Can't create database adapter : ", err)
+	}
 
 	hs := &app.HelloService{}
-	bs := &app.BankService{}
+	bs := app.NewBankService(databaseAdapter)
 
 	grpcAdapter := mygrpc.NewGrpcAdapter(hs, bs, 9090)
 
