@@ -29,7 +29,10 @@ Untuk tes dipostman:
 */
 func (a *GrpcAdapter) GetCurrentBalance(ctx context.Context, req *bank.CurrentBalanceRequest) (*bank.CurrentBalanceResponse, error) {
 	now := time.Now()
-	bal := a.bankService.FindCurrentBalance(req.AccoutNumber)
+	bal, err := a.bankService.FindCurrentBalance(req.AccoutNumber)
+	if err != nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "account %v not found", req.AccoutNumber)
+	}
 
 	return &bank.CurrentBalanceResponse{
 		Amount: bal,
@@ -228,10 +231,31 @@ func currentDatetime() *datetime.DateTime {
 	}
 }
 
+// buildTransferErrorStatusGrpc menerjemahkan error domain (dbank.Err...) menjadi
+// error gRPC (status.Status), lengkap dengan detail terstruktur untuk client.
+//
+// Berbeda dengan REST yang mengandalkan HTTP status (400, 404, 500, ...) plus
+// body JSON bebas, gRPC memakai dua lapis:
+//  1. Status code (codes.*): kategori error yang bisa dipahami mesin.
+//  2. Details (errdetails.*): pesan protobuf bertipe (bukan JSON bebas) yang
+//     menjelaskan error lebih rinci, sehingga client bisa memprosesnya
+//     tanpa parsing teks.
 func buildTransferErrorStatusGrpc(err error, req *bank.TransferRequest) error {
 	switch {
+
+	// FailedPrecondition (mirip HTTP 400/412):
+	// Format request valid, tetapi KONDISI/STATE sistem saat ini tidak
+	// memenuhi syarat operasi. Mengulang request yang sama tidak akan berhasil
+	// sebelum state-nya diperbaiki (misalnya rekening dibuat dulu).
+	//
+	// Catatan: NotFound (mirip HTTP 404) juga kandidat yang wajar di sini.
+	// Perbedaannya: NotFound dipakai untuk "resource yang diminta tidak ada",
+	// FailedPrecondition untuk "operasi tidak bisa jalan karena state".
+	// Keduanya sah, yang penting konsisten di seluruh API.
 	case errors.Is(err, dbank.ErrTransferSourceAccountNotFound):
 		s := status.New(codes.FailedPrecondition, err.Error())
+		// PreconditionFailure: daftar syarat yang gagal dipenuhi, tiap
+		// pelanggaran punya Type (kode mesin), Subject, dan Description.
 		s, _ = s.WithDetails(&errdetails.PreconditionFailure{
 			Violations: []*errdetails.PreconditionFailure_Violation{
 				{
@@ -243,6 +267,7 @@ func buildTransferErrorStatusGrpc(err error, req *bank.TransferRequest) error {
 		})
 		return s.Err()
 
+	// Sama seperti di atas, tetapi untuk rekening tujuan.
 	case errors.Is(err, dbank.ErrTransferDestinationAccountNotFound):
 		s := status.New(codes.FailedPrecondition, err.Error())
 		s, _ = s.WithDetails(&errdetails.PreconditionFailure{
@@ -256,6 +281,10 @@ func buildTransferErrorStatusGrpc(err error, req *bank.TransferRequest) error {
 		})
 		return s.Err()
 
+	// FailedPrecondition: saldo kurang adalah contoh klasik. Request-nya
+	// sendiri benar (nominal valid), tetapi state rekening (saldo) belum
+	// cukup. Request yang sama bisa berhasil nanti setelah saldo bertambah.
+	// Jika dipakai InvalidArgument, client akan mengira inputnya yang salah.
 	case errors.Is(err, dbank.ErrTransferInsufficientBalance):
 		s := status.New(codes.FailedPrecondition, err.Error())
 		s, _ = s.WithDetails(&errdetails.PreconditionFailure{
@@ -269,8 +298,13 @@ func buildTransferErrorStatusGrpc(err error, req *bank.TransferRequest) error {
 		})
 		return s.Err()
 
+	// InvalidArgument (mirip HTTP 400):
+	// Argumen dari client salah APAPUN kondisi sistem saat ini. Nominal <= 0
+	// akan selalu salah, dan retry tanpa mengubah input tidak ada gunanya.
 	case errors.Is(err, dbank.ErrTransferInvalidAmount):
 		s := status.New(codes.InvalidArgument, err.Error())
+		// BadRequest/FieldViolation: menunjuk field mana yang bermasalah,
+		// setara dengan pesan validasi per-field pada REST, tapi terstandar.
 		s, _ = s.WithDetails(&errdetails.BadRequest{
 			FieldViolations: []*errdetails.BadRequest_FieldViolation{
 				{Field: "amount", Description: "amount must be greater than zero"},
@@ -278,6 +312,8 @@ func buildTransferErrorStatusGrpc(err error, req *bank.TransferRequest) error {
 		})
 		return s.Err()
 
+	// InvalidArgument: rekening asal dan tujuan sama adalah kesalahan input,
+	// bukan masalah state sistem.
 	case errors.Is(err, dbank.ErrTransferSameAccount):
 		s := status.New(codes.InvalidArgument, err.Error())
 		s, _ = s.WithDetails(&errdetails.BadRequest{
@@ -287,8 +323,12 @@ func buildTransferErrorStatusGrpc(err error, req *bank.TransferRequest) error {
 		})
 		return s.Err()
 
+	// Internal (mirip HTTP 500):
+	// Kegagalan di sisi server (gagal menyimpan catatan transfer). Bukan salah
+	// client, dan client tidak bisa memperbaikinya lewat perubahan input.
 	case errors.Is(err, dbank.ErrTransferRecordFailed):
 		s := status.New(codes.Internal, err.Error())
+		// Help: tautan bantuan untuk pengguna/developer client.
 		s, _ = s.WithDetails(&errdetails.Help{
 			Links: []*errdetails.Help_Link{
 				{Url: "my-bank-website.com/faq", Description: "Bank FAQ"},
@@ -296,8 +336,13 @@ func buildTransferErrorStatusGrpc(err error, req *bank.TransferRequest) error {
 		})
 		return s.Err()
 
+	// Internal: gagal membuat pasangan transaksi karena masalah server/DB
+	// (saldo kurang sudah punya error tersendiri di atas).
 	case errors.Is(err, dbank.ErrTransferTransactionPair):
 		s := status.New(codes.Internal, err.Error())
+		// ErrorInfo: identitas error yang stabil untuk mesin. Reason adalah
+		// konstanta yang tidak berubah walau teks pesan diubah, dan Metadata
+		// membawa konteks tambahan (rekening, mata uang, nominal).
 		s, _ = s.WithDetails(&errdetails.ErrorInfo{
 			Domain: "my-bank-website.com",
 			Reason: "TRANSACTION_PAIR_FAILED",
@@ -310,8 +355,10 @@ func buildTransferErrorStatusGrpc(err error, req *bank.TransferRequest) error {
 		})
 		return s.Err()
 
+	// Error tak terduga: dicatat di log server, sedangkan client hanya
+	// menerima pesan generik supaya detail internal (query, nama tabel, dsb.)
+	// tidak bocor.
 	default:
-		// Jangan bocorkan pesan error internal ke client
 		log.Println("Unhandled transfer error :", err)
 		return status.Error(codes.Internal, "internal error")
 	}
