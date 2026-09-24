@@ -1,10 +1,14 @@
 package database
 
 import (
+	"errors"
 	"log"
 	"time"
 
+	dbank "github.com/aditya3232/my-grpc-go-server/internal/application/domain/bank"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func (a *DatabaseAdapter) GetBankAccountByAccountNumber(acct string) (BankAccountOrm, error) {
@@ -39,4 +43,46 @@ func (a *DatabaseAdapter) GetExchangeRateAtTimestamp(fromCur string, toCur strin
 		First(&exchangeRateOrm).Error
 
 	return exchangeRateOrm, err
+}
+
+var ErrInsufficientBalance = errors.New("insufficient balance")
+
+func (a *DatabaseAdapter) CreateTransaction(acct BankAccountOrm, t BankTransactionOrm) (uuid.UUID, error) {
+	err := a.db.Transaction(func(tx *gorm.DB) error {
+		// 1. Lock row akun dan ambil saldo terbaru dari DB
+		var locked BankAccountOrm
+		if err := tx.
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("account_uuid = ?", acct.AccountUUID). // sesuaikan dengan primary key kamu
+			First(&locked).Error; err != nil {
+			return err
+		}
+
+		// 2. Hitung saldo baru dari saldo yang sudah di-lock
+		delta := t.Amount
+		if t.TransactionType == dbank.TransactionTypeOut {
+			delta = -t.Amount
+		}
+
+		newBalance := locked.CurrentBalance + delta
+		if newBalance < 0 {
+			return ErrInsufficientBalance // cek saldo negatif
+		}
+
+		// 3. Simpan transaksi (pakai pointer)
+		if err := tx.Create(&t).Error; err != nil {
+			return err
+		}
+
+		// 4. Update saldo
+		return tx.Model(&locked).Updates(map[string]any{
+			"current_balance": newBalance,
+			"updated_at":      time.Now(),
+		}).Error
+	})
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	return t.TransactionUUID, nil
 }

@@ -2,12 +2,22 @@ package grpc
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/aditya3232/my-grpc-proto/protogen/go/bank"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/genproto/googleapis/type/date"
+	"google.golang.org/genproto/googleapis/type/datetime"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	dbank "github.com/aditya3232/my-grpc-go-server/internal/application/domain/bank"
 )
 
 /*
@@ -54,6 +64,150 @@ func (a *GrpcAdapter) FetchExchangeRates(req *bank.ExchangeRateRequest, stream g
 			log.Printf("Exchange rate sent to client, %v to %v : %v \n", req.FromCurrency, req.ToCurrency, rate)
 
 			time.Sleep(3 * time.Second)
+		}
+	}
+}
+
+func toTime(dt *datetime.DateTime) (time.Time, error) {
+	if dt == nil {
+		now := time.Now()
+
+		dt = &datetime.DateTime{
+			Year:    int32(now.Year()),
+			Month:   int32(now.Month()),
+			Day:     int32(now.Day()),
+			Hours:   int32(now.Hour()),
+			Minutes: int32(now.Minute()),
+			Seconds: int32(now.Second()),
+			Nanos:   int32(now.Nanosecond()),
+		}
+	}
+
+	res := time.Date(int(dt.Year), time.Month(dt.Month), int(dt.Day),
+		int(dt.Hours), int(dt.Minutes), int(dt.Seconds), int(dt.Nanos), time.UTC)
+
+	return res, nil
+}
+
+// SummarizeTransactions adalah handler gRPC client-streaming: client mengirim
+// banyak Transaction, lalu server membalas SATU TransactionSummary setelah
+// client selesai mengirim (ditandai io.EOF).
+func (a *GrpcAdapter) SummarizeTransactions(stream grpc.ClientStreamingServer[bank.Transaction, bank.TransactionSummary]) error {
+	// Akumulator ringkasan. Diisi bertahap setiap kali satu transaksi diterima.
+	tsum := dbank.TransactionSummary{
+		SummaryOnDate: time.Now(),
+		SumIn:         0,
+		SumOut:        0,
+		SumTotal:      0,
+	}
+	// Nomor rekening disimpan di luar loop supaya bisa dipakai saat
+	// membentuk response akhir. Nilainya ditimpa tiap pesan masuk.
+	acct := ""
+
+	// Loop membaca pesan dari client sampai stream ditutup.
+	for {
+		// Recv() memblokir sampai ada pesan berikutnya dari client.
+		req, err := stream.Recv()
+
+		// io.EOF berarti client sudah selesai mengirim semua transaksi.
+		// Saatnya membangun response ringkasan dan menutup stream.
+		if err == io.EOF {
+			res := bank.TransactionSummary{
+				AccountNumber: acct,
+				SumAmountIn:   tsum.SumIn,
+				SumAmountOut:  tsum.SumOut,
+				SumTotal:      tsum.SumTotal,
+				// Tanggal ringkasan diubah ke format google.type.Date
+				// (hanya tahun/bulan/hari, tanpa jam).
+				TransactionDate: &date.Date{
+					Year:  int32(tsum.SummaryOnDate.Year()),
+					Month: int32(tsum.SummaryOnDate.Month()),
+					Day:   int32(tsum.SummaryOnDate.Day()),
+				},
+			}
+
+			// Kirim response tunggal lalu tutup stream dari sisi server.
+			return stream.SendAndClose(&res)
+		}
+
+		// Error selain EOF (koneksi putus, context dibatalkan, dsb).
+		if err != nil {
+			log.Fatalln("Error while reading from client :", err)
+		}
+
+		// Catat nomor rekening dari transaksi terbaru.
+		acct = req.AccountNumber
+
+		// Konversi timestamp dari request ke time.Time.
+		ts, err := toTime(req.Timestamp)
+
+		if err != nil {
+			log.Fatalf("Error while parsing timestamp %v : %v", req.Timestamp, err)
+		}
+
+		// Petakan enum protobuf ke tipe transaksi domain.
+		// Defaultnya Unknown, jadi tipe di luar IN/OUT tidak akan salah dikenali.
+		ttype := dbank.TransactionTypeUnknown
+
+		switch req.Type {
+		case bank.TransactionType_TRANSACTION_TYPE_IN:
+			ttype = dbank.TransactionTypeIn
+		case bank.TransactionType_TRANSACTION_TYPE_OUT:
+			ttype = dbank.TransactionTypeOut
+		}
+
+		// Bentuk objek transaksi domain dari data request.
+		tcur := dbank.Transaction{
+			Amount:          req.Amount,
+			Timestamp:       ts,
+			TransactionType: ttype,
+		}
+
+		// Simpan transaksi ke database lewat service layer
+		// (di dalamnya mengubah saldo rekening juga).
+		accountUuid, err := a.bankService.CreateTransaction(req.AccountNumber, tcur)
+
+		// Kasus 1: gagal DAN UUID kosong. Diasumsikan rekening tidak ditemukan,
+		// jadi dibalas InvalidArgument dengan detail field "account_number".
+		if err != nil && accountUuid == uuid.Nil {
+			s := status.New(codes.InvalidArgument, err.Error())
+			s, _ = s.WithDetails(&errdetails.BadRequest{
+				FieldViolations: []*errdetails.BadRequest_FieldViolation{
+					{
+						Field:       "account_number",
+						Description: "Invalid account number",
+					},
+				},
+			})
+
+			return s.Err()
+			// Kasus 2: gagal TAPI UUID terisi. Rekening ada, jadi diasumsikan
+			// penyebabnya nominal melebihi saldo, dengan detail field "amount".
+		} else if err != nil && accountUuid != uuid.Nil {
+			s := status.New(codes.InvalidArgument, err.Error())
+			s, _ = s.WithDetails(&errdetails.BadRequest{
+				FieldViolations: []*errdetails.BadRequest_FieldViolation{
+					{
+						Field:       "amount",
+						Description: fmt.Sprintf("Requested amount %v exceed available balance", req.Amount),
+					},
+				},
+			})
+
+			return s.Err()
+		}
+
+		// Sisa error yang belum tertangani dicatat ke log saja.
+		if err != nil {
+			log.Println("Error while creating transaction :", err)
+		}
+
+		// Tambahkan transaksi ini ke akumulator ringkasan
+		// (menambah SumIn/SumOut dan menghitung SumTotal).
+		err = a.bankService.CalculateTransactionSummary(&tsum, tcur)
+
+		if err != nil {
+			return err
 		}
 	}
 }
