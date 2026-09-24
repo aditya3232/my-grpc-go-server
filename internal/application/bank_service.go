@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	db "github.com/aditya3232/my-grpc-go-server/internal/adapter/database"
+	"github.com/aditya3232/my-grpc-go-server/internal/application/domain/bank"
 	dbank "github.com/aditya3232/my-grpc-go-server/internal/application/domain/bank"
 	"github.com/aditya3232/my-grpc-go-server/internal/port"
 )
@@ -51,13 +52,13 @@ func (s *BankService) CreateExchangeRate(r dbank.ExchangeRate) (uuid.UUID, error
 	return s.db.CreateExchangeRate(exchangeRateOrm)
 }
 
-func (s *BankService) FindExchangeRate(fromCur string, toCur string, ts time.Time) float64 {
+func (s *BankService) FindExchangeRate(fromCur string, toCur string, ts time.Time) (float64, error) {
 	exchangeRate, err := s.db.GetExchangeRateAtTimestamp(fromCur, toCur, ts)
 	if err != nil {
-		return 0
+		return 0, err
 	}
 
-	return float64(exchangeRate.Rate)
+	return float64(exchangeRate.Rate), nil
 }
 
 func (s *BankService) CreateTransaction(acct string, t dbank.Transaction) (uuid.UUID, error) {
@@ -67,7 +68,14 @@ func (s *BankService) CreateTransaction(acct string, t dbank.Transaction) (uuid.
 	bankAccountOrm, err := s.db.GetBankAccountByAccountNumber(acct)
 	if err != nil {
 		log.Printf("Can't create transaction for %v : %v \n", acct, err)
-		return uuid.Nil, err
+		return uuid.Nil, fmt.Errorf("Can't find account number %v : %v", acct, err.Error())
+	}
+
+	if t.TransactionType == bank.TransactionTypeOut && bankAccountOrm.CurrentBalance < t.Amount {
+		return bankAccountOrm.AccountUUID, fmt.Errorf(
+			"Insufficient account balance %v for [out] transaction amount %v",
+			bankAccountOrm.CurrentBalance, t.Amount,
+		)
 	}
 
 	transactionOrm := db.BankTransactionOrm{

@@ -54,7 +54,22 @@ func (a *GrpcAdapter) FetchExchangeRates(req *bank.ExchangeRateRequest, stream g
 			return nil
 		default:
 			now := time.Now()
-			rate := a.bankService.FindExchangeRate(req.FromCurrency, req.ToCurrency, now)
+			rate, err := a.bankService.FindExchangeRate(req.FromCurrency, req.ToCurrency, now)
+
+			// mengembalikan error grpc menggunakan details
+			if err != nil {
+				s := status.New(codes.InvalidArgument, "Currency not valid. Please use valid currency for both from and to")
+				s, _ = s.WithDetails(&errdetails.ErrorInfo{
+					Domain: "m-bank-website.com",
+					Reason: "INVALID_CURRENCY",
+					Metadata: map[string]string{
+						"from_currency": req.FromCurrency,
+						"to_currency":   req.ToCurrency,
+					},
+				})
+
+				return s.Err()
+			}
 
 			stream.Send(
 				&bank.ExchangeRateResponse{
