@@ -1,6 +1,7 @@
 package application
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -100,4 +101,91 @@ func (s *BankService) CalculateTransactionSummary(tcur *dbank.TransactionSummary
 	tcur.SumTotal = tcur.SumIn - tcur.SumOut
 
 	return nil
+}
+
+func (s *BankService) Transfer(tt dbank.TransferTransaction) (uuid.UUID, bool, error) {
+	// 1. Validasi input sebelum menyentuh database
+	if tt.Amount <= 0 {
+		return uuid.Nil, false, dbank.ErrTransferInvalidAmount
+	}
+
+	if tt.FromAccountNumber == tt.ToAccountNumber {
+		return uuid.Nil, false, dbank.ErrTransferSameAccount
+	}
+
+	// 2. Ambil kedua rekening
+	fromAccountOrm, err := s.db.GetBankAccountByAccountNumber(tt.FromAccountNumber)
+	if err != nil {
+		log.Printf("Can't find transfer from account %v : %v\n", tt.FromAccountNumber, err)
+		return uuid.Nil, false, dbank.ErrTransferSourceAccountNotFound
+	}
+
+	toAccountOrm, err := s.db.GetBankAccountByAccountNumber(tt.ToAccountNumber)
+	if err != nil {
+		log.Printf("Can't find transfer to account %v : %v\n", tt.ToAccountNumber, err)
+		return uuid.Nil, false, dbank.ErrTransferDestinationAccountNotFound
+	}
+
+	// 3. Catat permintaan transfer (status awal: belum sukses)
+	now := time.Now()
+
+	transferOrm := db.BankTransferOrm{
+		TransferUUID:      uuid.New(),
+		FromAccountUUID:   fromAccountOrm.AccountUUID,
+		ToAccountUUID:     toAccountOrm.AccountUUID,
+		Currency:          tt.Currency,
+		Amount:            tt.Amount,
+		TransferTimestamp: now,
+		TransferSuccess:   false,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}
+
+	if _, err := s.db.CreateTransfer(transferOrm); err != nil {
+		log.Printf("Can't create transfer from %v to %v : %v\n", tt.FromAccountNumber, tt.ToAccountNumber, err)
+		return uuid.Nil, false, dbank.ErrTransferRecordFailed
+	}
+
+	// 4. Siapkan pasangan transaksi: uang keluar (pengirim) dan uang masuk (penerima)
+	fromTransactionOrm := db.BankTransactionOrm{
+		TransactionUUID:      uuid.New(),
+		TransactionTimestamp: now,
+		TransactionType:      dbank.TransactionTypeOut,
+		AccountUUID:          fromAccountOrm.AccountUUID,
+		Amount:               tt.Amount,
+		Notes:                "Transfer out to " + tt.ToAccountNumber,
+		CreatedAt:            now,
+		UpdatedAt:            now,
+	}
+
+	toTransactionOrm := db.BankTransactionOrm{
+		TransactionUUID:      uuid.New(),
+		TransactionTimestamp: now,
+		TransactionType:      dbank.TransactionTypeIn,
+		AccountUUID:          toAccountOrm.AccountUUID,
+		Amount:               tt.Amount,
+		Notes:                "Transfer in from " + tt.FromAccountNumber,
+		CreatedAt:            now,
+		UpdatedAt:            now,
+	}
+
+	// 5. Eksekusi transfer secara atomik (cek saldo dilakukan di dalam DB transaction)
+	if _, err := s.db.CreateTransferTransactionPair(fromAccountOrm, toAccountOrm, fromTransactionOrm, toTransactionOrm); err != nil {
+		log.Printf("Can't create transfer transaction pair from %v to %v : %v\n",
+			tt.FromAccountNumber, tt.ToAccountNumber, err)
+
+		if errors.Is(err, db.ErrInsufficientBalance) {
+			return transferOrm.TransferUUID, false, dbank.ErrTransferInsufficientBalance
+		}
+
+		return transferOrm.TransferUUID, false, dbank.ErrTransferTransactionPair
+	}
+
+	// 6. Tandai transfer sukses. Uang sudah berpindah, jadi kegagalan di sini
+	// hanya dicatat di log, bukan dikembalikan sebagai kegagalan transfer.
+	if err := s.db.UpdateTransferStatus(transferOrm, true); err != nil {
+		log.Printf("Transfer %v succeeded but status update failed : %v\n", transferOrm.TransferUUID, err)
+	}
+
+	return transferOrm.TransferUUID, true, nil
 }

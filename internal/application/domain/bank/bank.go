@@ -1,11 +1,24 @@
 package bank
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 const (
 	TransactionTypeUnknown string = "UNKNOWN"
 	TransactionTypeIn      string = "IN"
 	TransactionTypeOut     string = "OUT"
+)
+
+var (
+	ErrTransferSourceAccountNotFound      = errors.New("source account not found")
+	ErrTransferDestinationAccountNotFound = errors.New("destination account not found")
+	ErrTransferSameAccount                = errors.New("source and destination account must be different")
+	ErrTransferInvalidAmount              = errors.New("transfer amount must be greater than zero")
+	ErrTransferInsufficientBalance        = errors.New("insufficient balance on source account")
+	ErrTransferRecordFailed               = errors.New("can't create transfer record")
+	ErrTransferTransactionPair            = errors.New("can't create transfer transaction pair")
 )
 
 type ExchangeRate struct {
@@ -28,4 +41,11 @@ type TransactionSummary struct {
 	SumIn         float64
 	SumOut        float64
 	SumTotal      float64
+}
+
+type TransferTransaction struct {
+	FromAccountNumber string
+	ToAccountNumber   string
+	Currency          string
+	Amount            float64
 }

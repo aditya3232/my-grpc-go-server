@@ -50,3 +50,19 @@ type BankExchangeRateOrm struct {
 func (BankExchangeRateOrm) TableName() string {
 	return "bank_exchange_rates"
 }
+
+type BankTransferOrm struct {
+	TransferUUID      uuid.UUID `gorm:"primaryKey"`
+	FromAccountUUID   uuid.UUID
+	ToAccountUUID     uuid.UUID
+	Currency          string
+	Amount            float64
+	TransferTimestamp time.Time
+	TransferSuccess   bool
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
+func (BankTransferOrm) TableName() string {
+	return "bank_transfers"
+}
