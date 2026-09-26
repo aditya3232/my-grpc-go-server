@@ -4,6 +4,8 @@ github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERo
 github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
 github.com/aditya3232/my-grpc-proto v0.0.0-20260925021541-8a5114be8f2d h1:+mvsVvTBvMNkiWBRnA93WfNc3aqJzNOc4THYR3qGP3s=
 github.com/aditya3232/my-grpc-proto v0.0.0-20260925021541-8a5114be8f2d/go.mod h1:I6zSzLv5Xk1/3U/xwifLN36ER2VdA26bZBWdDip351Y=
+github.com/aditya3232/my-grpc-proto v0.0.0-20260926015329-afe59664763a h1:L1cLsjfRLL6bEUACsPiRSQKpkbiUoSMypmq5cLapZHY=
+github.com/aditya3232/my-grpc-proto v0.0.0-20260926015329-afe59664763a/go.mod h1:I6zSzLv5Xk1/3U/xwifLN36ER2VdA26bZBWdDip351Y=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
 github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/containerd/errdefs v1.0.0 h1:tg5yIfIlQIrxYtu9ajqY42W3lpS19XqdxRQeEwYG8PI=
