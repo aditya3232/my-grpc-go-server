@@ -29,9 +29,9 @@ Untuk tes dipostman:
 */
 func (a *GrpcAdapter) GetCurrentBalance(ctx context.Context, req *bank.CurrentBalanceRequest) (*bank.CurrentBalanceResponse, error) {
 	now := time.Now()
-	bal, err := a.bankService.FindCurrentBalance(req.AccoutNumber)
+	bal, err := a.bankService.FindCurrentBalance(req.AccountNumber)
 	if err != nil {
-		return nil, status.Errorf(codes.FailedPrecondition, "account %v not found", req.AccoutNumber)
+		return nil, status.Errorf(codes.FailedPrecondition, "account %v not found", req.AccountNumber)
 	}
 
 	return &bank.CurrentBalanceResponse{
